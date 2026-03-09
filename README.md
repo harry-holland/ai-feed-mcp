@@ -1,74 +1,92 @@
 # AI Feed MCP Connector
 
-Отдельный репозиторий для MCP-коннектора, который подключается к `ai-feed` по приватному API и отдаёт ChatGPT релевантные Telegram-источники.
+Standalone MCP connector for `ai-feed`.
 
-## Что есть сейчас
+It exposes read-only MCP tools for ChatGPT and proxies all retrieval to a protected `ai-feed` backend. The connector does not read Telegram directly and does not need database access.
 
-- Каркас MCP-сервера под `search` / `fetch`.
-- Контракт приватного API к `ai-feed`.
-- Архитектурные ограничения для безопасного MVP.
+## What It Does
 
-## Почему отдельный репозиторий
+- Exposes MCP tools: `search`, `search_sources`, `fetch`
+- Calls the private `ai-feed` API for retrieval
+- Returns canonical `t.me/...` links, snippets and metadata
+- Works as a separate repository that can be shown and deployed independently
 
-Заказчику нужно показывать коннектор как отдельный интеграционный продукт. При этом retrieval, индексация и ранжирование остаются в `ai-feed`, а MCP-слой занимается только:
+## Architecture
 
-- аутентификацией ChatGPT к коннектору;
-- экспозом read-only tools;
-- проксированием запросов в `ai-feed`;
-- нормализацией ответа под MCP tool result.
+```text
+ChatGPT -> AI Feed MCP Connector -> AI Feed Private API -> AI Feed index
+```
 
-## Рекомендуемый MVP
+The connector is intentionally thin:
 
-1. `ai-feed` даёт приватный read-only API для поиска и получения документа.
-2. MCP-коннектор вызывает только этот API.
-3. В индексе участвуют только `opt-in` Telegram-источники.
-4. В ChatGPT возвращаются канонические `t.me` ссылки, короткий excerpt, timestamp и score.
+- no direct database access
+- no write operations
+- no Telegram userbot logic
+- no corpus export endpoints
 
-## Почему нельзя просто использовать текущий ingest как есть
+## MCP Endpoint
 
-Текущий `ai-feed` уже умеет:
+The Streamable HTTP MCP endpoint is:
 
-- собирать Telegram-посты в БД;
-- хранить ссылки на `t.me/.../<message_id>`;
-- делать базовый retrieval для AI Search.
+```text
+/mcp
+```
 
-Но ingestion сейчас завязан на userbot/`pyrogram` и чтение истории каналов. Для MCP-сценария это плохая точка опоры для внешней интеграции: безопаснее и презентабельнее строить коннектор поверх официального `opt-in` потока каналов, а не поверх userbot-механики.
+Example public URL:
 
-## Инструменты MCP
+```text
+https://your-domain.example/mcp
+```
+
+## Available Tools
 
 ### `search`
 
-Ищет релевантные источники по запросу и возвращает список карточек:
+Search relevant Telegram sources for a query.
 
-- `id`
-- `title`
-- `url`
-- `snippet`
-- `published_at`
-- `source_type`
-- `channel_username`
-- `score`
-- `trust`
+### `search_sources`
+
+Alias for `search` when the client only needs linkable source cards.
 
 ### `fetch`
 
-Возвращает детальную карточку конкретного источника:
+Fetch the full normalized document for a previously returned source id.
 
-- `id`
-- `title`
-- `url`
-- `content`
-- `snippet`
-- `published_at`
-- `source_type`
-- `channel_username`
-- `metadata`
+## Requirements
 
-## Контракт с AI Feed
+- Python 3.12+
+- an `ai-feed` backend with MCP private API enabled
+- an `AI_FEED_API_KEY` with read-only MCP scope
 
-См. [docs/ai-feed-api-contract.md](docs/ai-feed-api-contract.md).
+## Environment Variables
 
-## Локальный запуск
+See [.env.example](.env.example).
+
+Required:
+
+```env
+AI_FEED_API_BASE_URL=http://localhost:9000
+AI_FEED_API_KEY=your-read-only-token
+```
+
+Get `AI_FEED_API_KEY` from the AI Feed bot:
+
+```text
+/mcp_token
+```
+
+The bot issues a personal MCP token for the current user. Reissuing the token invalidates the previous one.
+
+Optional:
+
+```env
+AI_FEED_TIMEOUT_SECONDS=20
+MCP_SERVER_NAME=ai-feed
+MCP_SERVER_VERSION=0.1.0
+MCP_SERVER_PORT=8081
+```
+
+## Local Run
 
 ```bash
 python3 -m venv .venv
@@ -77,27 +95,86 @@ pip install -e .
 uvicorn ai_feed_mcp.http_app:app --host 0.0.0.0 --port 8081
 ```
 
-## Запуск через Docker Compose
+Then the MCP endpoint is:
 
-Из корня основного проекта:
+```text
+http://localhost:8081/mcp
+```
+
+## Run With Docker
+
+```bash
+docker build -t ai-feed-mcp .
+docker run --rm -p 8081:8081 --env-file .env ai-feed-mcp
+```
+
+Then the MCP endpoint is:
+
+```text
+http://localhost:8081/mcp
+```
+
+## Run From The Main Project
+
+From the main `ai-feed` repository:
 
 ```bash
 docker compose up -d --build bot ai-feed-mcp
 ```
 
-После этого:
+With the current compose mapping:
 
-- `ai-feed` private API доступен на `http://localhost:${PAYMENT_API_PORT:-9000}`
-- MCP server доступен на `http://localhost:8081`
+- `ai-feed` private API: `http://localhost:9000`
+- MCP server: `http://localhost:8083/mcp`
 
-## Переменные окружения
+## Connect In ChatGPT
 
-См. [.env.example](.env.example).
+1. Deploy the connector behind public HTTPS.
+2. Use the public MCP URL ending with `/mcp`.
+3. Add it in ChatGPT as a custom MCP connector.
+4. Use read-only auth or no-auth only for internal demos.
 
-## Следующий шаг
+Important:
 
-Следующий практический шаг в основном `ai-feed`:
+- opening the MCP URL in a browser is not a useful health check
+- the correct check is that the endpoint responds as MCP transport on `/mcp`
 
-- вынести retrieval-логику из `AISearchWorker` в переиспользуемый сервис;
-- поднять приватные endpoints `search` и `fetch`;
-- добавить фильтр по `opt-in`/allowlist источникам.
+## Security Model
+
+This repository can be public, but the backend access must stay restricted.
+
+Recommended production model:
+
+- every `ai-feed` user gets a personal integration token
+- the token is scoped only for MCP read operations
+- the connector never gets database credentials
+- the backend enforces rate limits, revocation and per-user quotas
+
+Current token issue flow:
+
+- user opens the AI Feed bot
+- user runs `/mcp_token`
+- bot returns a personal MCP token
+- user places that token into `AI_FEED_API_KEY`
+
+See [docs/public-access-model.md](docs/public-access-model.md).
+
+## Private API Contract
+
+See [docs/ai-feed-api-contract.md](docs/ai-feed-api-contract.md).
+
+## Current Status
+
+This repository is ready for:
+
+- local development
+- standalone deployment
+- ChatGPT MCP integration
+
+What still belongs to the main `ai-feed` system:
+
+- user account lifecycle
+- token issuance
+- source allowlisting
+- rate limiting
+- per-user access policy
