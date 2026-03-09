@@ -29,7 +29,7 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
     client = AIFeedClient(settings)
     mcp = FastMCP(
         name=settings.mcp_server_name,
-        version=settings.mcp_server_version,
+        host="0.0.0.0",
         stateless_http=True,
         json_response=True,
     )
