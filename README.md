@@ -4,6 +4,43 @@ Standalone MCP connector for `ai-feed`.
 
 It exposes read-only MCP tools for ChatGPT and proxies all retrieval to a protected `ai-feed` backend. The connector does not read Telegram directly and does not need database access.
 
+## Quickstart
+
+1. Open the AI Feed bot: [https://t.me/aiaggregators_bot](https://t.me/aiaggregators_bot)
+2. Run:
+
+```text
+/mcp_token
+```
+
+3. Put the returned token into `.env`:
+
+```env
+AI_FEED_API_BASE_URL=http://localhost:9000
+AI_FEED_API_KEY=your-personal-token
+```
+
+4. Start the connector:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+uvicorn ai_feed_mcp.http_app:app --host 0.0.0.0 --port 8081
+```
+
+5. Use this MCP URL in ChatGPT:
+
+```text
+http://localhost:8081/mcp
+```
+
+For public ChatGPT usage, deploy it behind HTTPS and connect:
+
+```text
+https://your-domain.example/mcp
+```
+
 ## What It Does
 
 - Exposes MCP tools: `search`, `search_sources`, `fetch`
